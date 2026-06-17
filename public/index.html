@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎯 Billboard 投票实时监控</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a14;
+    --card: #12122a;
+    --border: #1e1e3a;
+    --text: #d0d0e0;
+    --muted: #707088;
+    --baek: #7c6ff7;
+    --cho: #f44b6e;
+    --gold: #f5a623;
+  }
+
+  body {
+    font-family: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .header h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--baek), var(--cho));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 4px;
+  }
+  .header .sub {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .header .sub span { color: var(--gold); font-weight: 600; }
+
+  /* ---- Status bar ---- */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 10px 20px;
+    background: var(--card);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 18px;
+  }
+  .status-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: #22c55e;
+    animation: pulse 1.8s infinite;
+  }
+  .status-dot.lost { background: #f87171; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  /* ---- Vote cards ---- */
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    width: 100%;
+    max-width: 900px;
+    margin-bottom: 18px;
+  }
+  .card {
+    background: var(--card);
+    border-radius: 18px;
+    padding: 20px 24px;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.3s;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .card.baek { border-color: rgba(124,111,247,0.3); }
+  .card.baek::before { background: var(--baek); }
+  .card.cho  { border-color: rgba(244,75,110,0.3); }
+  .card.cho::before  { background: var(--cho); }
+
+  .card-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .card-top .name {
+    font-size: 1.6rem;
+    font-weight: 800;
+  }
+  .card.baek .name { color: var(--baek); }
+  .card.cho  .name { color: var(--cho); }
+
+  .card-top .rank {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 20px;
+    text-transform: uppercase;
+  }
+  .rank.gold   { background: rgba(245,166,35,.18); color: var(--gold); }
+  .rank.silver { background: rgba(156,163,175,.18); color: #9ca3af; }
+
+  .vote-num {
+    font-size: 3.4rem;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.5px;
+    line-height: 1.1;
+  }
+  .card.baek .vote-num { color: #b5abff; }
+  .card.cho  .vote-num { color: #ff7b93; }
+
+  .stats {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 10px;
+    font-size: 0.88rem;
+  }
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .stat-row:last-child { border: none; }
+  .stat-label { color: var(--muted); }
+  .stat-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .up   { color: #4ade80; }
+  .down { color: #f87171; }
+  .neutral { color: var(--muted); }
+
+  .rate-per-sec { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+
+  /* ---- Gap ---- */
+  .gap-bar {
+    width: 100%;
+    max-width: 900px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 24px;
+    background: var(--card);
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+  .gap-num {
+    font-size: 2.2rem;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    color: var(--gold);
+  }
+  .gap-label { font-size: 0.75rem; color: var(--muted); }
+  .gap-catchup {
+    text-align: right;
+  }
+  .gap-catchup .val {
+    font-size: 1.3rem;
+    font-weight: 700;
+  }
+  .gap-catchup .val.good  { color: #4ade80; }
+  .gap-catchup .val.warn  { color: var(--gold); }
+  .gap-catchup .val.neutral { color: var(--muted); }
+
+  /* ---- Progress bar ---- */
+  .progress-wrap {
+    width: 100%;
+    max-width: 900px;
+    height: 12px;
+    background: #1e1e3a;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 18px;
+    display: flex;
+  }
+  .progress-baek {
+    height: 100%;
+    background: var(--baek);
+    transition: width 1s ease;
+  }
+  .progress-cho {
+    height: 100%;
+    background: var(--cho);
+    transition: width 1s ease;
+  }
+
+  /* ---- History ---- */
+  .history-wrap {
+    width: 100%;
+    max-width: 900px;
+    background: var(--card);
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    padding: 16px 20px;
+    margin-bottom: 18px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .history-wrap h3 {
+    font-size: 0.9rem;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+  th {
+    text-align: left;
+    padding: 6px 8px;
+    color: var(--muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--card);
+    z-index: 1;
+  }
+  td {
+    padding: 5px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    font-variant-numeric: tabular-nums;
+  }
+  tr:hover td { background: rgba(255,255,255,0.03); }
+  .delta-up   { color: #4ade80; }
+  .delta-down { color: #f87171; }
+
+  /* ---- Footer ---- */
+  .footer {
+    margin-top: 10px;
+    font-size: 0.72rem;
+    color: #383850;
+    text-align: center;
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 680px) {
+    .cards { grid-template-columns: 1fr; }
+    .vote-num { font-size: 2.4rem; }
+    .gap-num { font-size: 1.6rem; }
+    .header h1 { font-size: 1.5rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🎯 Billboard 投票实时监控</h1>
+  <div class="sub">边伯贤 <span>#190</span> vs 丑老八 <span>#211</span></div>
+</div>
+
+<div class="status-bar">
+  <span class="status-dot" id="dot"></span>
+  <span id="statusText">等待数据...</span>
+  <span>│</span>
+  <span>📡 更新间隔 <strong style="color:var(--baek);">10秒</strong></span>
+  <span>│</span>
+  <span>在线人数 <strong id="onlineCount" style="color:var(--cho);">1</strong></span>
+</div>
+
+<div class="cards">
+  <!-- 190 边伯贤 -->
+  <div class="card baek">
+    <div class="card-top">
+      <span class="name">边伯贤</span>
+      <span class="rank gold">🥇 #190</span>
+    </div>
+    <div class="vote-num" id="v190">—</div>
+    <div class="stats">
+      <div class="stat-row">
+        <span class="stat-label">📈 每10分钟预计涨幅</span>
+        <span class="stat-value" id="rate10_190">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">🕐 最近1小时总涨幅</span>
+        <span class="stat-value" id="d60_190">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">📊 增长率 (10分钟)</span>
+        <span class="stat-value" id="pct10_190">—</span>
+      </div>
+    </div>
+    <div class="rate-per-sec">⚡ 每秒约 <strong id="rps190">—</strong> 票</div>
+  </div>
+
+  <!-- 211 丑老八 -->
+  <div class="card cho">
+    <div class="card-top">
+      <span class="name">丑老八</span>
+      <span class="rank silver">🥈 #211</span>
+    </div>
+    <div class="vote-num" id="v211">—</div>
+    <div class="stats">
+      <div class="stat-row">
+        <span class="stat-label">📈 每10分钟预计涨幅</span>
+        <span class="stat-value" id="rate10_211">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">🕐 最近1小时总涨幅</span>
+        <span class="stat-value" id="d60_211">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">📊 增长率 (10分钟)</span>
+        <span class="stat-value" id="pct10_211">—</span>
+      </div>
+    </div>
+    <div class="rate-per-sec">⚡ 每秒约 <strong id="rps211">—</strong> 票</div>
+  </div>
+</div>
+
+<!-- Progress bar -->
+<div class="progress-wrap">
+  <div class="progress-baek" id="prog190" style="width:50%"></div>
+  <div class="progress-cho" id="prog211" style="width:50%"></div>
+</div>
+
+<!-- Vote gap -->
+<div class="gap-bar">
+  <div>
+    <div class="gap-label">📊 票差（边伯贤领先）</div>
+    <div class="gap-num" id="gapNum">—</div>
+  </div>
+  <div class="gap-catchup">
+    <div class="gap-label">⏱ 按当前增速追平预计</div>
+    <div class="val" id="catchUp">—</div>
+  </div>
+  <div>
+    <div class="gap-label">🔴 每秒票差变化</div>
+    <div id="netRate" style="font-weight:700;font-size:1.1rem;">—</div>
+  </div>
+</div>
+
+<!-- History table -->
+<div class="history-wrap">
+  <h3>📋 历史记录（最后40条，每行约10秒）</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>时间</th>
+        <th>边伯贤</th>
+        <th>丑老八</th>
+        <th>票差</th>
+        <th>Δ190</th>
+        <th>Δ211</th>
+      </tr>
+    </thead>
+    <tbody id="historyBody">
+      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">等待数据推送...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer">
+  数据来源：billboard.co.kr API ｜ 每10秒自动刷新 ｜ 纯前端展示，服务端拉取
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ===================== SOCKET.IO =====================
+const socket = io();
+let historyRows = []; // client-side for table deltas
+let prevV190 = null, prevV211 = null;
+
+// ===================== FORMATTERS =====================
+function fmt(n) {
+  if (n == null) return '—';
+  return n.toLocaleString('zh-CN');
+}
+function fmtDelta(n) {
+  if (n == null) return '—';
+  const s = (n >= 0 ? '+' : '') + n.toLocaleString('zh-CN');
+  return `<span class="${n >= 0 ? 'delta-up' : 'delta-down'}">${s}</span>`;
+}
+
+// ===================== SOCKET HANDLERS =====================
+socket.on('connect', () => {
+  $('dot').classList.remove('lost');
+  $('statusText').textContent = '实时连接中';
+  $('statusText').style.color = '#22c55e';
+});
+
+socket.on('disconnect', () => {
+  $('dot').classList.add('lost');
+  $('statusText').textContent = '连接断开，自动重连中...';
+  $('statusText').style.color = '#f87171';
+});
+
+socket.on('update', (s) => {
+  // ---- Vote numbers ----
+  $('v190').textContent = fmt(s.v190);
+  $('v211').textContent = fmt(s.v211);
+
+  // ---- 10-min rate ----
+  const r10_190 = $('rate10_190');
+  const r10_211 = $('rate10_211');
+  if (s.has10) {
+    r10_190.innerHTML = fmtDelta(s.rate10_190);
+    r10_211.innerHTML = fmtDelta(s.rate10_211);
+  } else {
+    r10_190.textContent = '数据不足，还需等待';
+    r10_211.textContent = '数据不足，还需等待';
+  }
+
+  // ---- 1-hour delta ----
+  const d60_190 = $('d60_190');
+  const d60_211 = $('d60_211');
+  if (s.has60) {
+    d60_190.innerHTML = fmtDelta(s.d60_190);
+    d60_211.innerHTML = fmtDelta(s.d60_211);
+  } else {
+    d60_190.textContent = '数据不足，还需等待';
+    d60_211.textContent = '数据不足，还需等待';
+  }
+
+  // ---- Percentage ----
+  $('pct10_190').textContent = s.pct10_190 != null ? (s.pct10_190 >= 0 ? '+' : '') + s.pct10_190.toFixed(3) + '%' : '—';
+  $('pct10_211').textContent = s.pct10_211 != null ? (s.pct10_211 >= 0 ? '+' : '') + s.pct10_211.toFixed(3) + '%' : '—';
+
+  // ---- Per-second rate ----
+  $('rps190').textContent = s.avgPerSec_190 != null ? fmtDelta(s.avgPerSec_190) : '—';
+  $('rps211').textContent = s.avgPerSec_211 != null ? fmtDelta(s.avgPerSec_211) : '—';
+
+  // ---- Gap ----
+  $('gapNum').textContent = fmt(s.gap);
+
+  // ---- Net rate per sec ----
+  const netPerSec = (s.avgPerSec_211 || 0) - (s.avgPerSec_190 || 0);
+  if (netPerSec > 0) {
+    $('netRate').innerHTML = `<span style="color:#f87171;">+${netPerSec}/秒 (丑老八更快)</span>`;
+  } else if (netPerSec < 0) {
+    $('netRate').innerHTML = `<span style="color:#4ade80;">${netPerSec}/秒 (边伯贤更快)</span>`;
+  } else {
+    $('netRate').textContent = '持平';
+  }
+
+  // ---- Catch-up ----
+  const cu = $('catchUp');
+  if (s.catchUpStr) {
+    cu.textContent = s.catchUpStr;
+    cu.className = 'val ' + s.catchUpClass;
+  } else {
+    cu.textContent = '—';
+    cu.className = 'val neutral';
+  }
+
+  // ---- Progress bar ----
+  const total = s.v190 + s.v211;
+  if (total > 0) {
+    const p190 = (s.v190 / total * 100).toFixed(1);
+    const p211 = (s.v211 / total * 100).toFixed(1);
+    $('prog190').style.width = p190 + '%';
+    $('prog211').style.width = p211 + '%';
+  }
+
+  // ---- History table ----
+  const row = {
+    time: s.time,
+    v190: s.v190,
+    v211: s.v211,
+    d190: prevV190 != null ? s.v190 - prevV190 : null,
+    d211: prevV211 != null ? s.v211 - prevV211 : null,
+  };
+  prevV190 = s.v190;
+  prevV211 = s.v211;
+  historyRows.push(row);
+  if (historyRows.length > 40) historyRows = historyRows.slice(-40);
+
+  const tbody = $('historyBody');
+  let html = '';
+  const rows = historyRows.slice().reverse();
+  for (const r of rows) {
+    const d = new Date(r.time);
+    const ts = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const gap = (r.v190 - r.v211).toLocaleString('zh-CN');
+    html += `<tr>
+      <td>${ts}</td>
+      <td>${fmt(r.v190)}</td>
+      <td>${fmt(r.v211)}</td>
+      <td>${gap}</td>
+      <td>${fmtDelta(r.d190)}</td>
+      <td>${fmtDelta(r.d211)}</td>
+    </tr>`;
+  }
+  tbody.innerHTML = html;
+
+  // Update online count periodically
+  $('statusText').textContent = '实时运行中';
+});
+
+// Online count via server ping
+setInterval(() => {
+  fetch('/socket.io/?EIO=4&transport=polling')
+    .catch(() => {});
+}, 15000);
+
+// ===================== HELPERS =====================
+function $(id) { return document.getElementById(id); }
+
+// Mark as connected if socket already connected
+if (socket.connected) {
+  $('statusText').textContent = '实时连接中';
+  $('statusText').style.color = '#22c55e';
+}
+</script>
+
+</body>
+</html>
