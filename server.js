@@ -12,7 +12,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ==================== CONFIG ====================
 const API_URL = 'https://billboard.co.kr/api/vote/status/';
 const POLL_INTERVAL = 10000; // 10 seconds
-const MAX_HISTORY = 720;     // ~2 hours at 10s/poll
+const MAX_HISTORY = 4320;    // ~12 hours at 10s/poll
 
 // ==================== STATE ====================
 let history = []; // [{ time: ms, v190, v211 }]
@@ -125,6 +125,56 @@ function computeStats() {
   };
 }
 
+// ==================== REST API ====================
+// GET /api/history?page=1&perPage=1000&hour=all
+// hour: "all" | 0-11 (last N hours)
+app.get('/api/history', (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const perPage = Math.min(parseInt(req.query.perPage) || 1000, 1000);
+  const hourFilter = req.query.hour || 'all';
+
+  let filtered = [...history];
+
+  // Filter by hour range
+  if (hourFilter !== 'all') {
+    const h = parseInt(hourFilter);
+    if (!isNaN(h) && h >= 0) {
+      const now = Date.now();
+      const fromTime = now - (h + 1) * 3600 * 1000;
+      const toTime = now - h * 3600 * 1000;
+      filtered = filtered.filter(e => e.time >= fromTime && e.time < toTime);
+    }
+  }
+
+  // Reverse: newest first
+  filtered = filtered.slice().reverse();
+
+  const totalItems = filtered.length;
+  const totalPages = Math.ceil(totalItems / perPage);
+  const start = (page - 1) * perPage;
+  const items = filtered.slice(start, start + perPage);
+
+  // Build hour options for filter dropdown
+  const now = Date.now();
+  const hourOptions = [];
+  for (let i = 0; i < 12; i++) {
+    const hourStart = new Date(now - (i + 1) * 3600 * 1000);
+    const hourEnd = new Date(now - i * 3600 * 1000);
+    hourOptions.push({
+      value: i,
+      label: `${hourStart.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})} ~ ${hourEnd.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`,
+      count: history.filter(e => e.time >= now - (i + 1) * 3600 * 1000 && e.time < now - i * 3600 * 1000).length
+    });
+  }
+
+  res.json({ items, page, perPage, totalItems, totalPages, hourOptions });
+});
+
+// GET /api/history/count - how many records total
+app.get('/api/history/count', (req, res) => {
+  res.json({ total: history.length, max: MAX_HISTORY, oldestTime: history.length > 0 ? history[0].time : null });
+});
+
 // ==================== SOCKET.IO ====================
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -132,6 +182,7 @@ io.on('connection', (socket) => {
   const stats = computeStats();
   if (stats) {
     socket.emit('update', stats);
+    socket.emit('history_data', { total: history.length });
   }
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
