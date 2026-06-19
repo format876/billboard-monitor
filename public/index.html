@@ -215,13 +215,89 @@
     border: 1px solid var(--border);
     padding: 16px 20px;
     margin-bottom: 18px;
-    max-height: 400px;
+    max-height: 600px;
     overflow-y: auto;
+  }
+  .history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
   }
   .history-wrap h3 {
     font-size: 0.9rem;
     color: var(--muted);
-    margin-bottom: 8px;
+    margin: 0;
+  }
+  .history-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .history-controls select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .history-controls select:focus {
+    outline: none;
+    border-color: var(--baek);
+  }
+  .page-info {
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .page-btn {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .page-btn:hover:not(:disabled) {
+    border-color: var(--baek);
+    background: rgba(124,111,247,0.1);
+  }
+  .page-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+  .page-btn.active {
+    border-color: var(--baek);
+    background: rgba(124,111,247,0.2);
+    color: var(--baek);
+  }
+  .export-btn {
+    background: rgba(245, 166, 35, 0.15);
+    color: var(--gold);
+    border: 1px solid rgba(245, 166, 35, 0.3);
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .export-btn:hover {
+    background: rgba(245, 166, 35, 0.25);
+    border-color: var(--gold);
+  }
+  .loading-row td {
+    text-align: center;
+    color: var(--muted);
+    padding: 24px;
   }
   table {
     width: 100%;
@@ -269,7 +345,7 @@
 
 <div class="header">
   <h1>🎯 Billboard 投票实时监控</h1>
-  <div class="sub">边伯贤 <span>#190</span> vs 丑老八 <span>#211</span></div>
+  <div class="sub">边伯贤 <span>#190</span> vs 竞争对手 <span>#211</span></div>
 </div>
 
 <div class="status-bar">
@@ -306,10 +382,10 @@
     <div class="rate-per-sec">⚡ 每秒约 <strong id="rps190">—</strong> 票</div>
   </div>
 
-  <!-- 211 丑老八 -->
+  <!-- 211 竞争对手 -->
   <div class="card cho">
     <div class="card-top">
-      <span class="name">丑老八</span>
+      <span class="name">竞争对手</span>
       <span class="rank silver">🥈 #211</span>
     </div>
     <div class="vote-num" id="v211">—</div>
@@ -354,21 +430,33 @@
 </div>
 
 <!-- History table -->
-<div class="history-wrap">
-  <h3>📋 历史记录（最后40条，每行约10秒）</h3>
+<div class="history-wrap" id="historyWrap">
+  <div class="history-header">
+    <h3>📋 历史记录</h3>
+    <div class="history-controls">
+      <select id="hourFilter" onchange="loadHistory(1)">
+        <option value="all">全部 12小时</option>
+      </select>
+      <span class="page-info" id="pageInfo"></span>
+      <button class="page-btn" onclick="loadHistory(1)" title="最新">⏮</button>
+      <button class="page-btn" id="prevBtn" onclick="changePage(-1)">◀</button>
+      <button class="page-btn" id="nextBtn" onclick="changePage(1)">▶</button>
+      <button class="export-btn" onclick="exportCSV()" title="导出最近12小时数据">📥 导出CSV</button>
+    </div>
+  </div>
   <table>
     <thead>
       <tr>
         <th>时间</th>
-        <th>边伯贤</th>
-        <th>丑老八</th>
+        <th>边伯贤 #190</th>
+        <th>竞争对手 #211</th>
         <th>票差</th>
-        <th>Δ190</th>
-        <th>Δ211</th>
+        <th>Δ190/10s</th>
+        <th>Δ211/10s</th>
       </tr>
     </thead>
     <tbody id="historyBody">
-      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">等待数据推送...</td></tr>
+      <tr class="loading-row"><td colspan="6">加载中...</td></tr>
     </tbody>
   </table>
 </div>
@@ -381,8 +469,11 @@
 <script>
 // ===================== SOCKET.IO =====================
 const socket = io();
-let historyRows = []; // client-side for table deltas
-let prevV190 = null, prevV211 = null;
+
+// ===================== HISTORY STATE =====================
+let currentPage = 1;
+let totalPages = 1;
+const PER_PAGE = 100;
 
 // ===================== FORMATTERS =====================
 function fmt(n) {
@@ -395,11 +486,160 @@ function fmtDelta(n) {
   return `<span class="${n >= 0 ? 'delta-up' : 'delta-down'}">${s}</span>`;
 }
 
+// ===================== CSV EXPORT =====================
+async function exportCSV() {
+  try {
+    // Fetch all data for the last 12 hours
+    const resp = await fetch('/api/history?page=1&perPage=1000&hour=all');
+    const data = await resp.json();
+    
+    if (!data.items || data.items.length === 0) {
+      alert('暂无数据可导出');
+      return;
+    }
+
+    // Build CSV content
+    const headers = ['时间', '边伯贤(#190)', '竞争对手(#211)', '票差', '边伯贤增速(每10秒)', '竞争对手增速(每10秒)'];
+    const rows = [];
+    
+    // Sort by time ascending (oldest first) for CSV
+    const sortedItems = [...data.items].sort((a, b) => a.time - b.time);
+    
+    for (let i = 0; i < sortedItems.length; i++) {
+      const r = sortedItems[i];
+      const next = sortedItems[i + 1];
+      const d190 = next ? next.v190 - r.v190 : null;
+      const d211 = next ? next.v211 - r.v211 : null;
+      
+      const d = new Date(r.time);
+      const ts = d.toLocaleString('zh-CN', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit', 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        hour12: false 
+      });
+      
+      rows.push([
+        ts,
+        r.v190,
+        r.v211,
+        r.v190 - r.v211,
+        d190 != null ? d190 : '',
+        d211 != null ? d211 : ''
+      ]);
+    }
+
+    // Convert to CSV string
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => {
+        // Escape cells containing commas or quotes
+        const cellStr = String(cell);
+        if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+          return `"${cellStr.replace(/"/g, '""')}"`;
+        }
+        return cellStr;
+      }).join(','))
+    ].join('\n');
+
+    // Create download
+    const BOM = '\uFEFF'; // UTF-8 BOM for Excel compatibility
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    // Generate filename with date
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '-');
+    
+    link.href = url;
+    link.download = `billboard-data-${dateStr}_${timeStr}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    console.log(`✅ CSV exported: ${rows.length} rows`);
+  } catch (err) {
+    console.error('Export failed:', err);
+    alert('导出失败，请重试');
+  }
+}
+
+// ===================== HISTORY LOADER =====================
+async function loadHistory(page) {
+  const hour = $('hourFilter').value;
+  $('historyBody').innerHTML = '<tr class="loading-row"><td colspan="6">加载中...</td></tr>';
+
+  try {
+    const resp = await fetch(`/api/history?page=${page}&perPage=${PER_PAGE}&hour=${hour}`);
+    const data = await resp.json();
+    currentPage = data.page;
+    totalPages = data.totalPages;
+
+    // Update hour filter options
+    const sel = $('hourFilter');
+    sel.innerHTML = '<option value="all">全部 12小时</option>';
+    data.hourOptions.forEach(opt => {
+      sel.innerHTML += `<option value="${opt.value}">${opt.label} (${opt.count}条)</option>`;
+    });
+    sel.value = hour;
+
+    // Render rows
+    const tbody = $('historyBody');
+    if (data.items.length === 0) {
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="6">该时段暂无数据</td></tr>';
+    } else {
+      let html = '';
+      for (let i = 0; i < data.items.length; i++) {
+        const r = data.items[i];
+        // Delta from next (older) entry since data is newest-first
+        const next = data.items[i + 1];
+        const d190 = next ? r.v190 - next.v190 : null;
+        const d211 = next ? r.v211 - next.v211 : null;
+
+        const d = new Date(r.time);
+        const ts = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const gap = (r.v190 - r.v211).toLocaleString('zh-CN');
+        html += `<tr>
+          <td>${ts}</td>
+          <td>${fmt(r.v190)}</td>
+          <td>${fmt(r.v211)}</td>
+          <td>${gap}</td>
+          <td>${d190 != null ? fmtDelta(d190) : '—'}</td>
+          <td>${d211 != null ? fmtDelta(d211) : '—'}</td>
+        </tr>`;
+      }
+      tbody.innerHTML = html;
+    }
+
+    // Update pagination
+    $('pageInfo').textContent = `第${currentPage}/${totalPages}页 共${data.totalItems}条`;
+    $('prevBtn').disabled = currentPage <= 1;
+    $('nextBtn').disabled = currentPage >= totalPages;
+  } catch (err) {
+    $('historyBody').innerHTML = '<tr class="loading-row"><td colspan="6">加载失败，重试中...</td></tr>';
+  }
+}
+
+function changePage(delta) {
+  const newPage = currentPage + delta;
+  if (newPage >= 1 && newPage <= totalPages) {
+    loadHistory(newPage);
+  }
+}
+
 // ===================== SOCKET HANDLERS =====================
 socket.on('connect', () => {
   $('dot').classList.remove('lost');
   $('statusText').textContent = '实时连接中';
   $('statusText').style.color = '#22c55e';
+  // Reload history on connect (initial load)
+  loadHistory(1);
 });
 
 socket.on('disconnect', () => {
@@ -449,7 +689,7 @@ socket.on('update', (s) => {
   // ---- Net rate per sec ----
   const netPerSec = (s.avgPerSec_211 || 0) - (s.avgPerSec_190 || 0);
   if (netPerSec > 0) {
-    $('netRate').innerHTML = `<span style="color:#f87171;">+${netPerSec}/秒 (丑老八更快)</span>`;
+    $('netRate').innerHTML = `<span style="color:#f87171;">+${netPerSec}/秒 (竞争对手更快)</span>`;
   } else if (netPerSec < 0) {
     $('netRate').innerHTML = `<span style="color:#4ade80;">${netPerSec}/秒 (边伯贤更快)</span>`;
   } else {
@@ -475,55 +715,16 @@ socket.on('update', (s) => {
     $('prog211').style.width = p211 + '%';
   }
 
-  // ---- History table ----
-  const row = {
-    time: s.time,
-    v190: s.v190,
-    v211: s.v211,
-    d190: prevV190 != null ? s.v190 - prevV190 : null,
-    d211: prevV211 != null ? s.v211 - prevV211 : null,
-  };
-  prevV190 = s.v190;
-  prevV211 = s.v211;
-  historyRows.push(row);
-  if (historyRows.length > 40) historyRows = historyRows.slice(-40);
-
-  const tbody = $('historyBody');
-  let html = '';
-  const rows = historyRows.slice().reverse();
-  for (const r of rows) {
-    const d = new Date(r.time);
-    const ts = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const gap = (r.v190 - r.v211).toLocaleString('zh-CN');
-    html += `<tr>
-      <td>${ts}</td>
-      <td>${fmt(r.v190)}</td>
-      <td>${fmt(r.v211)}</td>
-      <td>${gap}</td>
-      <td>${fmtDelta(r.d190)}</td>
-      <td>${fmtDelta(r.d211)}</td>
-    </tr>`;
+  // ---- Auto-refresh history if on page 1 (newest data) ----
+  if (currentPage === 1) {
+    loadHistory(1);
   }
-  tbody.innerHTML = html;
 
-  // Update online count periodically
   $('statusText').textContent = '实时运行中';
 });
 
-// Online count via server ping
-setInterval(() => {
-  fetch('/socket.io/?EIO=4&transport=polling')
-    .catch(() => {});
-}, 15000);
-
 // ===================== HELPERS =====================
 function $(id) { return document.getElementById(id); }
-
-// Mark as connected if socket already connected
-if (socket.connected) {
-  $('statusText').textContent = '实时连接中';
-  $('statusText').style.color = '#22c55e';
-}
 </script>
 
 </body>
