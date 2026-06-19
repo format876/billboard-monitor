@@ -279,6 +279,21 @@
     background: rgba(124,111,247,0.2);
     color: var(--baek);
   }
+  .export-btn {
+    background: rgba(245, 166, 35, 0.15);
+    color: var(--gold);
+    border: 1px solid rgba(245, 166, 35, 0.3);
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .export-btn:hover {
+    background: rgba(245, 166, 35, 0.25);
+    border-color: var(--gold);
+  }
   .loading-row td {
     text-align: center;
     color: var(--muted);
@@ -330,7 +345,7 @@
 
 <div class="header">
   <h1>🎯 Billboard 投票实时监控</h1>
-  <div class="sub">边伯贤 <span>#190</span> vs 丑老八 <span>#211</span></div>
+  <div class="sub">边伯贤 <span>#190</span> vs 竞争对手 <span>#211</span></div>
 </div>
 
 <div class="status-bar">
@@ -367,10 +382,10 @@
     <div class="rate-per-sec">⚡ 每秒约 <strong id="rps190">—</strong> 票</div>
   </div>
 
-  <!-- 211 丑老八 -->
+  <!-- 211 竞争对手 -->
   <div class="card cho">
     <div class="card-top">
-      <span class="name">丑老八</span>
+      <span class="name">竞争对手</span>
       <span class="rank silver">🥈 #211</span>
     </div>
     <div class="vote-num" id="v211">—</div>
@@ -426,6 +441,7 @@
       <button class="page-btn" onclick="loadHistory(1)" title="最新">⏮</button>
       <button class="page-btn" id="prevBtn" onclick="changePage(-1)">◀</button>
       <button class="page-btn" id="nextBtn" onclick="changePage(1)">▶</button>
+      <button class="export-btn" onclick="exportCSV()" title="导出最近12小时数据">📥 导出CSV</button>
     </div>
   </div>
   <table>
@@ -433,7 +449,7 @@
       <tr>
         <th>时间</th>
         <th>边伯贤 #190</th>
-        <th>丑老八 #211</th>
+        <th>竞争对手 #211</th>
         <th>票差</th>
         <th>Δ190/10s</th>
         <th>Δ211/10s</th>
@@ -468,6 +484,90 @@ function fmtDelta(n) {
   if (n == null) return '—';
   const s = (n >= 0 ? '+' : '') + n.toLocaleString('zh-CN');
   return `<span class="${n >= 0 ? 'delta-up' : 'delta-down'}">${s}</span>`;
+}
+
+// ===================== CSV EXPORT =====================
+async function exportCSV() {
+  try {
+    // Fetch all data for the last 12 hours
+    const resp = await fetch('/api/history?page=1&perPage=1000&hour=all');
+    const data = await resp.json();
+    
+    if (!data.items || data.items.length === 0) {
+      alert('暂无数据可导出');
+      return;
+    }
+
+    // Build CSV content
+    const headers = ['时间', '边伯贤(#190)', '竞争对手(#211)', '票差', '边伯贤增速(每10秒)', '竞争对手增速(每10秒)'];
+    const rows = [];
+    
+    // Sort by time ascending (oldest first) for CSV
+    const sortedItems = [...data.items].sort((a, b) => a.time - b.time);
+    
+    for (let i = 0; i < sortedItems.length; i++) {
+      const r = sortedItems[i];
+      const next = sortedItems[i + 1];
+      const d190 = next ? next.v190 - r.v190 : null;
+      const d211 = next ? next.v211 - r.v211 : null;
+      
+      const d = new Date(r.time);
+      const ts = d.toLocaleString('zh-CN', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit', 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        hour12: false 
+      });
+      
+      rows.push([
+        ts,
+        r.v190,
+        r.v211,
+        r.v190 - r.v211,
+        d190 != null ? d190 : '',
+        d211 != null ? d211 : ''
+      ]);
+    }
+
+    // Convert to CSV string
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => {
+        // Escape cells containing commas or quotes
+        const cellStr = String(cell);
+        if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+          return `"${cellStr.replace(/"/g, '""')}"`;
+        }
+        return cellStr;
+      }).join(','))
+    ].join('\n');
+
+    // Create download
+    const BOM = '\uFEFF'; // UTF-8 BOM for Excel compatibility
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    // Generate filename with date
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '-');
+    
+    link.href = url;
+    link.download = `billboard-data-${dateStr}_${timeStr}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    console.log(`✅ CSV exported: ${rows.length} rows`);
+  } catch (err) {
+    console.error('Export failed:', err);
+    alert('导出失败，请重试');
+  }
 }
 
 // ===================== HISTORY LOADER =====================
@@ -589,7 +689,7 @@ socket.on('update', (s) => {
   // ---- Net rate per sec ----
   const netPerSec = (s.avgPerSec_211 || 0) - (s.avgPerSec_190 || 0);
   if (netPerSec > 0) {
-    $('netRate').innerHTML = `<span style="color:#f87171;">+${netPerSec}/秒 (丑老八更快)</span>`;
+    $('netRate').innerHTML = `<span style="color:#f87171;">+${netPerSec}/秒 (竞争对手更快)</span>`;
   } else if (netPerSec < 0) {
     $('netRate').innerHTML = `<span style="color:#4ade80;">${netPerSec}/秒 (边伯贤更快)</span>`;
   } else {
